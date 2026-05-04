@@ -2105,18 +2105,22 @@ def health_check():
 
 
 # ========== APPLICATION ENTRY POINT ==========
+# THIS MUST RUN FOR RENDER/GUNICORN - NOT inside if __name__ block
+with app.app_context():
+    try:
+        # Create all tables
+        db.create_all()
+        logger.info("✅ Database tables created/verified")
+        
+        # Seed the database if empty
+        seed_database_if_empty()
+        
+    except Exception as e:
+        logger.error(f"❌ Database initialization error: {str(e)}")
+        logger.error(traceback.format_exc())
+        # Don't exit - let the app try to run anyway
+
+# Local development only
 if __name__ == '__main__':
-    with app.app_context():
-        try:
-            db.create_all()
-            logger.info("Database tables created/verified")
-            
-            # Seed the database if empty (checks CMP_users table specifically)
-            seed_database_if_empty()
-            
-        except Exception as e:
-            logger.error(f"Database initialization error: {str(e)}")
-            sys.exit(1)
-    
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
