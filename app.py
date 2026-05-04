@@ -79,7 +79,8 @@ login_manager.login_message = 'Please log in to access this page.'
 login_manager.login_message_category = 'warning'
 login_manager.session_protection = 'strong'
 
-# Initialize Cloudinary
+# Initialize Cloudinary with upload preset
+CLOUDINARY_UPLOAD_PRESET = 'marketplace_preset'  # Create this in Cloudinary settings
 try:
     if app.config['CLOUDINARY_CLOUD_NAME']:
         cloudinary.config(
@@ -271,9 +272,8 @@ def seed_database_if_empty():
             seller2_id = seller2.id
             buyer_id = buyer.id
             
-            # Products data
+            # Products data - using Unsplash images
             products_data = [
-                # Fashion Category
                 {'name': 'Handmade Leather Bag', 'description': 'Beautiful handmade leather bag crafted by local artisans. Perfect for everyday use.', 'price': 850.00, 'stock_quantity': 10, 'category': 'clothing', 'seller_id': seller_id, 'is_approved': True, 'image_url': 'https://images.unsplash.com/photo-1590874103328-eac38a683ce7?w=400&h=300&fit=crop'},
                 {'name': 'Premium Denim Jacket', 'description': 'Classic denim jacket with modern fit. Made from high-quality cotton.', 'price': 650.00, 'stock_quantity': 20, 'category': 'clothing', 'seller_id': seller_id, 'is_approved': True, 'image_url': 'https://images.unsplash.com/photo-1576995853123-5a10305d93c0?w=400&h=300&fit=crop'},
                 {'name': 'Running Shoes', 'description': 'Lightweight running shoes with superior cushioning. Breathable mesh upper.', 'price': 899.00, 'stock_quantity': 15, 'category': 'sports', 'seller_id': seller_id, 'is_approved': True, 'image_url': 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=400&h=300&fit=crop'},
@@ -1327,7 +1327,7 @@ def product_detail(product_id):
         return redirect(url_for('products'))
 
 
-# ========== UPDATED ADD PRODUCT WITH CLOUDINARY ERROR HANDLING ==========
+# ========== UPDATED ADD PRODUCT WITH WORKING CLOUDINARY ==========
 @app.route('/product/add', methods=['GET', 'POST'])
 @login_required
 @seller_required
@@ -1336,23 +1336,30 @@ def add_product():
     if form.validate_on_submit():
         try:
             image_url = None
+            
+            # Handle image upload
             if 'product_image' in request.files:
                 file = request.files['product_image']
                 if file and file.filename:
                     try:
-                        # Try to upload to Cloudinary
-                        upload_result = cloudinary.uploader.upload(file)
+                        # Upload to Cloudinary with preset
+                        upload_result = cloudinary.uploader.upload(
+                            file,
+                            upload_preset='marketplace_preset',  # You must create this preset in Cloudinary
+                            folder='marketplace_products'
+                        )
                         image_url = upload_result.get('secure_url')
                         logger.info(f"Image uploaded successfully: {image_url}")
+                        flash('Image uploaded successfully!', 'success')
                     except Exception as cloud_error:
-                        # If Cloudinary fails, use a placeholder and log the error
                         logger.error(f"Cloudinary upload error: {str(cloud_error)}")
-                        image_url = 'https://via.placeholder.com/400x300?text=Product+Image'
-                        flash('Image upload failed, using placeholder image.', 'warning')
+                        flash('Failed to upload image. Please try again or use a different image.', 'danger')
+                        return render_template('products/add_product.html', form=form)
             
-            # If no image was uploaded or Cloudinary failed, use placeholder
+            # If no image was uploaded, show error
             if not image_url:
-                image_url = 'https://via.placeholder.com/400x300?text=Product+Image'
+                flash('Please upload a product image.', 'danger')
+                return render_template('products/add_product.html', form=form)
             
             product = CMP_Product(
                 name=form.name.data.strip(),
@@ -1402,15 +1409,21 @@ def edit_product(product_id):
             product.stock_quantity = form.stock_quantity.data
             product.category = form.category.data
             
+            # Handle new image upload
             if 'product_image' in request.files:
                 file = request.files['product_image']
                 if file and file.filename:
                     try:
-                        upload_result = cloudinary.uploader.upload(file)
+                        upload_result = cloudinary.uploader.upload(
+                            file,
+                            upload_preset='marketplace_preset',
+                            folder='marketplace_products'
+                        )
                         product.image_url = upload_result.get('secure_url')
+                        flash('Product image updated!', 'success')
                     except Exception as cloud_error:
                         logger.error(f"Cloudinary upload error in edit: {str(cloud_error)}")
-                        flash('Image upload failed, keeping existing image.', 'warning')
+                        flash('Failed to upload new image. Keeping existing image.', 'warning')
             
             with db_transaction():
                 pass
