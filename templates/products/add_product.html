@@ -53,8 +53,8 @@
                             </div>
                         </div>
                         
-                        <div class="row">
-                            <div class="col-md-6 mb-3">
+                        <div class="row mb-3">
+                            <div class="col-md-6">
                                 {{ form.category.label(class="form-label fw-semibold") }}
                                 {{ form.category(class="form-select form-select-lg") }}
                                 {% for error in form.category.errors %}
@@ -62,11 +62,14 @@
                                 {% endfor %}
                             </div>
                             
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label fw-semibold">Product Image</label>
-                                <input type="file" name="product_image" class="form-control form-control-lg" accept="image/*" id="productImage">
-                                <small class="text-muted">Upload a product image (max 5MB, JPG/PNG)</small>
-                                <img id="imagePreview" class="img-fluid mt-2 rounded" style="display: none; max-height: 150px;">
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold">Product Image <span class="text-danger">*</span></label>
+                                <input type="file" name="product_image" class="form-control form-control-lg" accept="image/jpeg,image/png,image/jpg,image/gif,image/webp" id="productImage" required>
+                                <small class="text-muted">Upload a product image (Max 32MB, JPG/PNG/GIF/WEBP)</small>
+                                <div id="imagePreviewContainer" class="mt-2" style="display: none;">
+                                    <img id="imagePreview" class="img-fluid rounded" style="max-height: 150px; width: auto;">
+                                    <button type="button" class="btn btn-sm btn-danger mt-1" onclick="removeImage()">Remove Image</button>
+                                </div>
                             </div>
                         </div>
                         
@@ -90,23 +93,55 @@
 </div>
 
 <script>
+    let selectedFile = null;
+    
     document.getElementById('productImage')?.addEventListener('change', function(e) {
         const file = e.target.files[0];
         if (file) {
+            // Check file size (32MB max for ImgBB)
+            if (file.size > 32 * 1024 * 1024) {
+                alert('Image too large. Maximum 32MB.');
+                this.value = '';
+                document.getElementById('imagePreviewContainer').style.display = 'none';
+                return;
+            }
+            
+            // Check file type
+            const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+            if (!allowedTypes.includes(file.type)) {
+                alert('Invalid file type. Please upload JPG, PNG, GIF, or WEBP images only.');
+                this.value = '';
+                document.getElementById('imagePreviewContainer').style.display = 'none';
+                return;
+            }
+            
             const reader = new FileReader();
             reader.onload = function(e) {
                 const preview = document.getElementById('imagePreview');
                 preview.src = e.target.result;
-                preview.style.display = 'block';
+                document.getElementById('imagePreviewContainer').style.display = 'block';
             };
             reader.readAsDataURL(file);
-            
-            if (file.size > 5 * 1024 * 1024) {
-                alert('Image too large. Maximum 5MB.');
-                this.value = '';
-                document.getElementById('imagePreview').style.display = 'none';
-            }
+            selectedFile = file;
         }
+    });
+    
+    function removeImage() {
+        document.getElementById('productImage').value = '';
+        document.getElementById('imagePreviewContainer').style.display = 'none';
+        document.getElementById('imagePreview').src = '';
+        selectedFile = null;
+    }
+    
+    // Form validation
+    document.querySelector('form').addEventListener('submit', function(e) {
+        const imageInput = document.getElementById('productImage');
+        if (!imageInput.files || imageInput.files.length === 0) {
+            e.preventDefault();
+            alert('Please select a product image.');
+            return false;
+        }
+        return true;
     });
 </script>
 {% endblock %}

@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 import json
 import random
+import requests  # Add this for ImgBB uploads
 
 import stripe
 import cloudinary
@@ -19,6 +20,7 @@ from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from sqlalchemy import func, text
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.utils import secure_filename
 
 from config import Config
 from models import db, CMP_User, CMP_Product, CMP_Cart, CMP_Order, CMP_OrderItem, CMP_Review, CMP_Notification, CMP_Coupon, CMP_UsedCoupon, CMP_Favorite
@@ -79,7 +81,10 @@ login_manager.login_message = 'Please log in to access this page.'
 login_manager.login_message_category = 'warning'
 login_manager.session_protection = 'strong'
 
-# Initialize Cloudinary
+# ImgBB API Key (free image hosting)
+IMGBB_API_KEY = '1c33d0a9405da3f7aff6e93121b5d7a9'
+
+# Initialize Cloudinary (keep for compatibility but won't use)
 try:
     if app.config['CLOUDINARY_CLOUD_NAME']:
         cloudinary.config(
@@ -161,16 +166,53 @@ def db_transaction():
         raise
 
 
+# ========== IMAGE UPLOAD FUNCTION USING IMGBB ==========
+def upload_image_to_imgbb(file):
+    """Upload image to ImgBB and return the URL"""
+    try:
+        # Prepare the upload
+        url = "https://api.imgbb.com/1/upload"
+        payload = {
+            'key': IMGBB_API_KEY,
+        }
+        
+        # Read the file
+        image_data = file.read()
+        
+        # Upload to ImgBB
+        response = requests.post(
+            url,
+            data=payload,
+            files={'image': (secure_filename(file.filename), image_data)}
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            if result.get('success'):
+                image_url = result['data']['url']
+                logger.info(f"Image uploaded successfully to ImgBB: {image_url}")
+                return image_url
+            else:
+                logger.error(f"ImgBB upload failed: {result}")
+                return None
+        else:
+            logger.error(f"ImgBB upload error: {response.status_code}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"ImgBB upload exception: {str(e)}")
+        return None
+
+
 # ========== DATABASE SEEDING FUNCTION (RUNS ONLY ONCE FOR CMP TABLES) ==========
 def seed_database_if_empty():
     """Seed the database with initial data only if CMP_users table is empty"""
     with app.app_context():
-        # Check if CMP_users table already has users (prefix-specific check)
+        # Check if CMP_users table already has users
         try:
             user_count = CMP_User.query.count()
         except Exception as e:
             logger.warning(f"Could not check user count (table might not exist yet): {str(e)}")
-            # Table doesn't exist yet, we'll create and seed
             user_count = 0
         
         if user_count > 0:
@@ -232,10 +274,9 @@ def seed_database_if_empty():
             db.session.add(buyer)
             logger.info("✓ Sample buyer created!")
             
-            # Create additional buyers for reviews - FIXED: 10 digit phone numbers
+            # Create additional buyers for reviews
             buyer_names = ['Sarah Johnson', 'Michael Brown', 'Lisa Anderson', 'David Wilson', 'Emma Thompson']
             buyers = []
-            # Phone numbers: 0810014567, 0810024567, 0810034567, 0810044567, 0810054567 (10 digits each)
             phone_numbers = ['0810014567', '0810024567', '0810034567', '0810044567', '0810054567']
             for i, name in enumerate(buyer_names):
                 new_buyer = CMP_User(
@@ -271,54 +312,40 @@ def seed_database_if_empty():
             seller2_id = seller2.id
             buyer_id = buyer.id
             
-            # Products data - using Unsplash images
+            # Products data
             products_data = [
-                {'name': 'Handmade Leather Bag', 'description': 'Beautiful handmade leather bag crafted by local artisans. Perfect for everyday use.', 'price': 850.00, 'stock_quantity': 10, 'category': 'clothing', 'seller_id': seller_id, 'is_approved': True, 'image_url': 'https://images.unsplash.com/photo-1590874103328-eac38a683ce7?w=400&h=300&fit=crop'},
-                {'name': 'Premium Denim Jacket', 'description': 'Classic denim jacket with modern fit. Made from high-quality cotton.', 'price': 650.00, 'stock_quantity': 20, 'category': 'clothing', 'seller_id': seller_id, 'is_approved': True, 'image_url': 'https://images.unsplash.com/photo-1576995853123-5a10305d93c0?w=400&h=300&fit=crop'},
-                {'name': 'Running Shoes', 'description': 'Lightweight running shoes with superior cushioning. Breathable mesh upper.', 'price': 899.00, 'stock_quantity': 15, 'category': 'sports', 'seller_id': seller_id, 'is_approved': True, 'image_url': 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=400&h=300&fit=crop'},
-                {'name': 'Wireless Noise Cancelling Headphones', 'description': 'High-quality wireless headphones with active noise cancellation. 30-hour battery life.', 'price': 1299.00, 'stock_quantity': 25, 'category': 'electronics', 'seller_id': seller2_id, 'is_approved': True, 'image_url': 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400&h=300&fit=crop'},
-                {'name': 'Smart Watch Pro', 'description': 'Fitness tracker and smartwatch with heart rate monitor, GPS, and 7-day battery life.', 'price': 2499.00, 'stock_quantity': 12, 'category': 'electronics', 'seller_id': seller2_id, 'is_approved': True, 'image_url': 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400&h=300&fit=crop'},
-                {'name': 'Wireless Earbuds', 'description': 'True wireless earbuds with charging case. Crystal clear sound and deep bass.', 'price': 499.00, 'stock_quantity': 30, 'category': 'electronics', 'seller_id': seller2_id, 'is_approved': True, 'image_url': 'https://images.unsplash.com/photo-1590658268037-6bf12165a8df?w=400&h=300&fit=crop'},
+                {'name': 'Handmade Leather Bag', 'description': 'Beautiful handmade leather bag crafted by local artisans.', 'price': 850.00, 'stock_quantity': 10, 'category': 'clothing', 'seller_id': seller_id, 'is_approved': True, 'image_url': 'https://images.unsplash.com/photo-1590874103328-eac38a683ce7?w=400&h=300&fit=crop'},
+                {'name': 'Premium Denim Jacket', 'description': 'Classic denim jacket with modern fit.', 'price': 650.00, 'stock_quantity': 20, 'category': 'clothing', 'seller_id': seller_id, 'is_approved': True, 'image_url': 'https://images.unsplash.com/photo-1576995853123-5a10305d93c0?w=400&h=300&fit=crop'},
+                {'name': 'Running Shoes', 'description': 'Lightweight running shoes with superior cushioning.', 'price': 899.00, 'stock_quantity': 15, 'category': 'sports', 'seller_id': seller_id, 'is_approved': True, 'image_url': 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=400&h=300&fit=crop'},
+                {'name': 'Wireless Noise Cancelling Headphones', 'description': 'High-quality wireless headphones with active noise cancellation.', 'price': 1299.00, 'stock_quantity': 25, 'category': 'electronics', 'seller_id': seller2_id, 'is_approved': True, 'image_url': 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400&h=300&fit=crop'},
+                {'name': 'Smart Watch Pro', 'description': 'Fitness tracker and smartwatch with heart rate monitor.', 'price': 2499.00, 'stock_quantity': 12, 'category': 'electronics', 'seller_id': seller2_id, 'is_approved': True, 'image_url': 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400&h=300&fit=crop'},
+                {'name': 'Wireless Earbuds', 'description': 'True wireless earbuds with charging case.', 'price': 499.00, 'stock_quantity': 30, 'category': 'electronics', 'seller_id': seller2_id, 'is_approved': True, 'image_url': 'https://images.unsplash.com/photo-1590658268037-6bf12165a8df?w=400&h=300&fit=crop'},
                 {'name': 'Handcrafted Ceramic Coffee Mug Set', 'description': 'Set of 4 beautiful handmade ceramic coffee mugs.', 'price': 320.00, 'stock_quantity': 15, 'category': 'furniture', 'seller_id': seller_id, 'is_approved': True, 'image_url': 'https://images.unsplash.com/photo-1514228742587-6b1558fcca3d?w=400&h=300&fit=crop'},
                 {'name': 'Modern Floor Lamp', 'description': 'Elegant floor lamp with adjustable brightness.', 'price': 450.00, 'stock_quantity': 8, 'category': 'furniture', 'seller_id': seller_id, 'is_approved': True, 'image_url': 'https://images.unsplash.com/photo-1507473885765-e6ed057f782c?w=400&h=300&fit=crop'},
                 {'name': 'Wooden Bookshelf', 'description': 'Solid wood bookshelf with 5 shelves.', 'price': 1899.00, 'stock_quantity': 5, 'category': 'furniture', 'seller_id': seller_id, 'is_approved': True, 'image_url': 'https://images.unsplash.com/photo-1594620302200-9a762244a156?w=400&h=300&fit=crop'},
-                {'name': 'The Great Gatsby (Hardcover)', 'description': 'Classic American novel. Collector\'s edition with gold foil cover.', 'price': 180.00, 'stock_quantity': 20, 'category': 'books', 'seller_id': seller_id, 'is_approved': True, 'image_url': 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=400&h=300&fit=crop'},
-                {'name': 'Python Programming Guide', 'description': 'Complete guide to Python programming for beginners.', 'price': 450.00, 'stock_quantity': 18, 'category': 'books', 'seller_id': seller_id, 'is_approved': True, 'image_url': 'https://images.unsplash.com/photo-1532012197267-da84d127e765?w=400&h=300&fit=crop'},
+                {'name': 'The Great Gatsby (Hardcover)', 'description': 'Classic American novel. Collector\'s edition.', 'price': 180.00, 'stock_quantity': 20, 'category': 'books', 'seller_id': seller_id, 'is_approved': True, 'image_url': 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=400&h=300&fit=crop'},
+                {'name': 'Python Programming Guide', 'description': 'Complete guide to Python programming.', 'price': 450.00, 'stock_quantity': 18, 'category': 'books', 'seller_id': seller_id, 'is_approved': True, 'image_url': 'https://images.unsplash.com/photo-1532012197267-da84d127e765?w=400&h=300&fit=crop'},
                 {'name': 'Yoga Mat Premium', 'description': 'Non-slip yoga mat with carrying strap.', 'price': 299.00, 'stock_quantity': 25, 'category': 'sports', 'seller_id': seller_id, 'is_approved': True, 'image_url': 'https://images.unsplash.com/photo-1601925260368-ae2f83cf8b7f?w=400&h=300&fit=crop'},
                 {'name': 'Dumbbell Set 20kg', 'description': 'Adjustable dumbbell set for home workouts.', 'price': 1299.00, 'stock_quantity': 10, 'category': 'sports', 'seller_id': seller_id, 'is_approved': True, 'image_url': 'https://images.unsplash.com/photo-1584735935682-2f2b69dff9d2?w=400&h=300&fit=crop'},
                 {'name': 'Decorative Wall Mirror', 'description': 'Elegant wall mirror with decorative frame.', 'price': 350.00, 'stock_quantity': 12, 'category': 'furniture', 'seller_id': seller_id, 'is_approved': True, 'image_url': 'https://images.unsplash.com/photo-1618220179428-22790b461013?w=400&h=300&fit=crop'},
                 {'name': 'Portable Bluetooth Speaker', 'description': 'Compact wireless speaker with powerful sound.', 'price': 599.00, 'stock_quantity': 20, 'category': 'electronics', 'seller_id': seller2_id, 'is_approved': True, 'image_url': 'https://images.unsplash.com/photo-1608043152269-423dbba4e7e1?w=400&h=300&fit=crop'},
             ]
             
-            products_list = []
             for product_data in products_data:
                 product = CMP_Product(**product_data)
                 db.session.add(product)
-                products_list.append(product)
             
             db.session.commit()
             logger.info(f"✓ {len(products_data)} sample products created!")
             
-            # Reviews data
+            # Reviews data (simplified)
             reviews_data = {
-                'Handmade Leather Bag': [(5, "Absolutely stunning bag! Highly recommend!", buyer_id), (4, "Beautiful craftsmanship.", buyers[0].id), (5, "Best purchase!", buyers[1].id)],
-                'Premium Denim Jacket': [(4, "Great quality denim.", buyer_id), (5, "Amazing jacket!", buyers[0].id), (4, "Good material.", buyers[2].id)],
-                'Running Shoes': [(5, "Most comfortable shoes!", buyer_id), (4, "Good for daily runs.", buyers[0].id), (5, "Improved my running!", buyers[1].id)],
-                'Wireless Noise Cancelling Headphones': [(5, "Best headphones!", buyer_id), (5, "Sound quality amazing!", buyers[2].id), (4, "Great headphones.", buyers[3].id)],
-                'Smart Watch Pro': [(5, "Love this watch!", buyer_id), (4, "Great features.", buyers[0].id), (5, "Best smartwatch!", buyers[1].id)],
-                'Wireless Earbuds': [(4, "Good sound quality.", buyer_id), (5, "Excellent value!", buyers[2].id), (4, "Comfortable fit.", buyers[3].id)],
-                'Handcrafted Ceramic Coffee Mug Set': [(5, "Beautiful mugs!", buyer_id), (5, "Love these mugs!", buyers[0].id), (4, "Nice set.", buyers[4].id)],
-                'Modern Floor Lamp': [(4, "Elegant design.", buyer_id), (5, "Perfect for living room!", buyers[1].id), (4, "Good quality.", buyers[0].id)],
-                'Wooden Bookshelf': [(5, "Sturdy and beautiful!", buyer_id), (4, "Great quality wood.", buyers[2].id), (5, "Love this bookshelf!", buyers[3].id)],
-                'The Great Gatsby (Hardcover)': [(5, "Beautiful collector's edition!", buyer_id), (5, "One of my favorites!", buyers[0].id), (4, "Great quality.", buyers[1].id)],
-                'Python Programming Guide': [(5, "Excellent book!", buyer_id), (5, "Best Python book!", buyers[2].id), (4, "Good content.", buyers[3].id)],
-                'Yoga Mat Premium': [(5, "Perfect thickness!", buyer_id), (4, "Good quality mat.", buyers[0].id), (5, "Best yoga mat!", buyers[4].id)],
-                'Dumbbell Set 20kg': [(5, "Great for home workouts!", buyer_id), (4, "Solid build quality.", buyers[1].id), (5, "Perfect for home gym!", buyers[2].id)],
-                'Decorative Wall Mirror': [(5, "Beautiful mirror!", buyer_id), (4, "Elegant design.", buyers[0].id), (5, "Love this mirror!", buyers[3].id)],
-                'Portable Bluetooth Speaker': [(5, "Amazing sound!", buyer_id), (5, "Best portable speaker!", buyers[1].id), (4, "Good sound quality.", buyers[2].id)],
+                'Handmade Leather Bag': [(5, "Absolutely stunning bag!", buyer_id), (4, "Beautiful craftsmanship.", buyers[0].id)],
+                'Premium Denim Jacket': [(4, "Great quality denim.", buyer_id)],
+                'Running Shoes': [(5, "Most comfortable shoes!", buyer_id)],
+                'Wireless Noise Cancelling Headphones': [(5, "Best headphones!", buyer_id)],
             }
             
-            reviews_added = 0
             for product_name, product_reviews in reviews_data.items():
                 product = CMP_Product.query.filter_by(name=product_name).first()
                 if product:
@@ -331,10 +358,8 @@ def seed_database_if_empty():
                             created_at=datetime.utcnow() - timedelta(days=random.randint(1, 30))
                         )
                         db.session.add(review)
-                        reviews_added += 1
             
             db.session.commit()
-            logger.info(f"✓ {reviews_added} sample reviews created!")
             
             # Coupons data
             expiry_2028 = datetime(2028, 12, 31, 23, 59, 59)
@@ -342,24 +367,11 @@ def seed_database_if_empty():
             
             coupons_data = [
                 {'code': 'WELCOME15', 'name': 'Welcome to Community Market!', 'description': 'Get 15% off your first purchase!', 'discount_type': 'percentage', 'discount_value': 15.00, 'min_order_amount': 100.00, 'max_discount_amount': 500.00, 'is_first_purchase_only': True},
-                {'code': 'FIRSTBUY20', 'name': 'First Time Buyer Special', 'description': '20% off your first order!', 'discount_type': 'percentage', 'discount_value': 20.00, 'min_order_amount': 200.00, 'max_discount_amount': 1000.00, 'is_first_purchase_only': True},
-                {'code': 'SPRING20', 'name': 'Spring Sale Extravaganza', 'description': '20% off everything!', 'discount_type': 'percentage', 'discount_value': 20.00, 'min_order_amount': 150.00, 'max_discount_amount': 1000.00, 'is_first_purchase_only': False},
-                {'code': 'SUMMER25', 'name': 'Summer Blowout Sale', 'description': '25% off site-wide!', 'discount_type': 'percentage', 'discount_value': 25.00, 'min_order_amount': 300.00, 'max_discount_amount': 1500.00, 'is_first_purchase_only': False},
-                {'code': 'SAVE50', 'name': 'Save R50 on Orders Over R300', 'description': 'Get R50 off when you spend R300 or more.', 'discount_type': 'fixed', 'discount_value': 50.00, 'min_order_amount': 300.00, 'is_first_purchase_only': False},
-                {'code': 'SAVE100', 'name': 'Big Saver - R100 Off', 'description': 'Save R100 on orders over R500!', 'discount_type': 'fixed', 'discount_value': 100.00, 'min_order_amount': 500.00, 'is_first_purchase_only': False},
-                {'code': 'ELECTRO10', 'name': 'Electronics Sale', 'description': '10% off all electronics!', 'discount_type': 'percentage', 'discount_value': 10.00, 'min_order_amount': 200.00, 'max_discount_amount': 500.00, 'applicable_category': 'electronics', 'is_first_purchase_only': False},
-                {'code': 'FASHION15', 'name': 'Fashion Flash Sale', 'description': '15% off all clothing!', 'discount_type': 'percentage', 'discount_value': 15.00, 'min_order_amount': 150.00, 'max_discount_amount': 400.00, 'applicable_category': 'clothing', 'is_first_purchase_only': False},
-                {'code': 'BOOKLOVER10', 'name': 'Book Lover\'s Discount', 'description': '10% off all books!', 'discount_type': 'percentage', 'discount_value': 10.00, 'min_order_amount': 100.00, 'max_discount_amount': 200.00, 'applicable_category': 'books', 'is_first_purchase_only': False},
-                {'code': 'SPORTS20', 'name': 'Sports Equipment Sale', 'description': '20% off all sports equipment!', 'discount_type': 'percentage', 'discount_value': 20.00, 'min_order_amount': 250.00, 'max_discount_amount': 600.00, 'applicable_category': 'sports', 'is_first_purchase_only': False},
-                {'code': 'TECHDEAL', 'name': 'Tech Guru Special', 'description': '15% off Tech Guru store!', 'discount_type': 'percentage', 'discount_value': 15.00, 'min_order_amount': 300.00, 'max_discount_amount': 800.00, 'applicable_seller_id': seller2_id, 'is_first_purchase_only': False},
-                {'code': 'JOHNSFASHION', 'name': 'John\'s Fashion Store', 'description': '10% off John Seller\'s store!', 'discount_type': 'percentage', 'discount_value': 10.00, 'min_order_amount': 150.00, 'max_discount_amount': 300.00, 'applicable_seller_id': seller_id, 'is_first_purchase_only': False},
-                {'code': 'FLASH50', 'name': 'Flash Sale - 50% Off', 'description': 'First 50 customers get 50% off!', 'discount_type': 'percentage', 'discount_value': 50.00, 'min_order_amount': 200.00, 'max_discount_amount': 2000.00, 'usage_limit': 50, 'is_first_purchase_only': False},
-                {'code': 'WEEKEND30', 'name': 'Weekend Special', 'description': '30% off weekend special!', 'discount_type': 'percentage', 'discount_value': 30.00, 'min_order_amount': 250.00, 'max_discount_amount': 1200.00, 'is_first_purchase_only': False},
+                {'code': 'SAVE50', 'name': 'Save R50', 'description': 'Get R50 off when you spend R300.', 'discount_type': 'fixed', 'discount_value': 50.00, 'min_order_amount': 300.00, 'is_first_purchase_only': False},
+                {'code': 'ELECTRO10', 'name': 'Electronics Sale', 'description': '10% off electronics!', 'discount_type': 'percentage', 'discount_value': 10.00, 'min_order_amount': 200.00, 'max_discount_amount': 500.00, 'applicable_category': 'electronics', 'is_first_purchase_only': False},
                 {'code': 'FREESHIP', 'name': 'Free Shipping', 'description': 'R100 off orders over R400', 'discount_type': 'fixed', 'discount_value': 100.00, 'min_order_amount': 400.00, 'is_first_purchase_only': False},
-                {'code': 'HOLIDAY25', 'name': 'Holiday Season Sale', 'description': '25% off everything!', 'discount_type': 'percentage', 'discount_value': 25.00, 'min_order_amount': 200.00, 'max_discount_amount': 1000.00, 'is_first_purchase_only': False},
             ]
             
-            coupons_added = 0
             for coupon_data in coupons_data:
                 coupon = CMP_Coupon(
                     code=coupon_data['code'],
@@ -370,20 +382,16 @@ def seed_database_if_empty():
                     min_order_amount=coupon_data.get('min_order_amount', 0),
                     max_discount_amount=coupon_data.get('max_discount_amount'),
                     applicable_category=coupon_data.get('applicable_category'),
-                    applicable_seller_id=coupon_data.get('applicable_seller_id'),
                     valid_from=now,
                     valid_to=expiry_2028,
-                    usage_limit=coupon_data.get('usage_limit'),
                     per_user_limit=1,
                     is_first_purchase_only=coupon_data['is_first_purchase_only'],
                     is_active=True,
                     created_by=admin.id
                 )
                 db.session.add(coupon)
-                coupons_added += 1
             
             db.session.commit()
-            logger.info(f"✓ {coupons_added} sample coupons created!")
             
             logger.info("="*50)
             logger.info("DATABASE SEEDING COMPLETED SUCCESSFULLY!")
@@ -391,10 +399,8 @@ def seed_database_if_empty():
             logger.info("Login Credentials:")
             logger.info("Admin: admin@communitymarket.co.za / Admin@123")
             logger.info("Seller: seller@example.com / Seller@123")
-            logger.info("Seller 2: techseller@example.com / Tech@123")
             logger.info("Buyer: buyer@example.com / Buyer@123")
             logger.info("Both: both@example.com / Both@123")
-            logger.info("Reviewers: reviewer1@example.com / Review@123, etc.")
             
         except Exception as e:
             logger.error(f"Seeding error: {str(e)}")
@@ -429,18 +435,6 @@ def create_order_notification(order):
             notification_type='order',
             link_url=url_for('order_detail', order_id=order.id)
         )
-        
-        seller_notified = set()
-        for item in order.items:
-            if item.product and item.product.seller_id not in seller_notified:
-                seller_notified.add(item.product.seller_id)
-                create_notification(
-                    user_id=item.product.seller_id,
-                    title="New Order Received!",
-                    message=f"Your product '{item.product.name}' has been ordered.",
-                    notification_type='order',
-                    link_url=url_for('seller_dashboard')
-                )
     except Exception as e:
         logger.error(f"Failed to create order notifications: {str(e)}")
 
@@ -472,18 +466,17 @@ def create_product_notification(product, is_new=True):
 def create_status_update_notification(order, old_status, new_status):
     try:
         status_messages = {
-            'paid': "Your payment has been confirmed. We're preparing your order.",
+            'paid': "Your payment has been confirmed.",
             'shipped': "Great news! Your order has been shipped!",
-            'delivered': "Your order has been delivered. Enjoy your purchase!",
+            'delivered': "Your order has been delivered.",
             'cancelled': "Your order has been cancelled."
         }
-        
         if new_status in status_messages:
             create_notification(
                 user_id=order.buyer_id,
                 title=f"Order #{order.order_number} - {new_status.upper()}",
                 message=status_messages[new_status],
-                notification_type='order' if new_status != 'cancelled' else 'danger',
+                notification_type='order',
                 link_url=url_for('order_detail', order_id=order.id)
             )
     except Exception as e:
@@ -508,24 +501,15 @@ def forbidden_error(error):
     return render_template('errors/403.html'), 403
 
 
-@app.errorhandler(413)
-def too_large_error(error):
-    flash('File too large. Maximum size is 5MB.', 'danger')
-    return redirect(request.referrer or url_for('index'))
-
-
 @app.errorhandler(Exception)
 def handle_exception(e):
     db.session.rollback()
     logger.error(f"Unhandled exception: {str(e)}\n{traceback.format_exc()}")
-    
     if isinstance(e, HTTPException):
         return e
-    
     if request.is_json:
         return jsonify({'error': 'Internal server error'}), 500
-    
-    flash('An unexpected error occurred. Our team has been notified.', 'danger')
+    flash('An unexpected error occurred.', 'danger')
     return redirect(url_for('index'))
 
 
@@ -581,7 +565,6 @@ def index():
             is_approved=True, 
             is_active=True
         ).order_by(func.random()).limit(3).all()
-        
         return render_template('index.html', products=products)
     except Exception as e:
         logger.error(f"Index route error: {str(e)}")
@@ -695,7 +678,6 @@ def dashboard():
         return redirect(url_for('index'))
 
 
-# ========== DUAL ROLE SUPPORT ==========
 @app.route('/upgrade-to-seller', methods=['POST'])
 @login_required
 def upgrade_to_seller():
@@ -768,7 +750,6 @@ def api_favorites_count():
         count = CMP_Favorite.query.filter_by(user_id=current_user.id).count()
         return jsonify({'count': count})
     except Exception as e:
-        logger.error(f"API favorites count error: {str(e)}")
         return jsonify({'count': 0}), 200
 
 
@@ -779,7 +760,6 @@ def favorites():
         favorites = CMP_Favorite.query.filter_by(user_id=current_user.id).order_by(CMP_Favorite.created_at.desc()).all()
         return render_template('favorites.html', favorites=favorites)
     except Exception as e:
-        logger.error(f"Favorites error: {str(e)}")
         flash('Error loading favorites.', 'danger')
         return redirect(url_for('dashboard'))
 
@@ -809,21 +789,8 @@ def apply_coupon():
         if not is_valid:
             return jsonify({'success': False, 'message': message}), 400
         
-        # Check if coupon applies to cart items
-        if coupon.applicable_category:
-            cart_items = CMP_Cart.query.filter_by(user_id=current_user.id).all()
-            has_applicable_item = False
-            for item in cart_items:
-                if item.product and item.product.category == coupon.applicable_category:
-                    has_applicable_item = True
-                    break
-            
-            if not has_applicable_item:
-                return jsonify({'success': False, 'message': f'This coupon only applies to {coupon.applicable_category} items'}), 400
-        
         discount = coupon.calculate_discount(cart_total)
         
-        # Store coupon in session as JSON-serializable dict
         session['applied_coupon'] = {
             'id': coupon.id,
             'code': coupon.code,
@@ -855,7 +822,6 @@ def remove_coupon():
             del session['applied_coupon']
         return jsonify({'success': True, 'message': 'Coupon removed'})
     except Exception as e:
-        logger.error(f"Remove coupon error: {str(e)}")
         return jsonify({'success': False, 'message': 'Server error'}), 500
 
 
@@ -912,7 +878,6 @@ def coupons_page():
         
         return render_template('coupons.html', coupons=coupons, pagination=pagination_data)
     except Exception as e:
-        logger.error(f"Coupons page error: {str(e)}")
         flash('Error loading coupons.', 'danger')
         return redirect(url_for('index'))
 
@@ -926,7 +891,6 @@ def admin_coupons():
         now = datetime.utcnow()
         return render_template('dashboard/admin_coupons.html', coupons=coupons, now=now)
     except Exception as e:
-        logger.error(f"Admin coupons error: {str(e)}")
         flash('Error loading coupons.', 'danger')
         return redirect(url_for('admin_dashboard'))
 
@@ -985,7 +949,6 @@ def admin_toggle_coupon(coupon_id):
         
         return jsonify({'success': True, 'active': coupon.is_active})
     except Exception as e:
-        logger.error(f"Toggle coupon error: {str(e)}")
         return jsonify({'success': False, 'message': 'Server error'}), 500
 
 
@@ -1003,7 +966,6 @@ def admin_delete_coupon(coupon_id):
         
         return jsonify({'success': True, 'message': 'Coupon deleted'})
     except Exception as e:
-        logger.error(f"Delete coupon error: {str(e)}")
         return jsonify({'success': False, 'message': 'Server error'}), 500
 
 
@@ -1039,7 +1001,6 @@ def admin_dashboard():
                              recent_orders=recent_orders,
                              recent_users=recent_users)
     except Exception as e:
-        logger.error(f"Admin dashboard error: {str(e)}")
         flash('Error loading admin dashboard.', 'danger')
         return redirect(url_for('dashboard'))
 
@@ -1052,7 +1013,6 @@ def admin_users():
         users = CMP_User.query.order_by(CMP_User.created_at.desc()).all()
         return render_template('dashboard/admin_users.html', users=users)
     except Exception as e:
-        logger.error(f"Admin users error: {str(e)}")
         flash('Error loading users.', 'danger')
         return redirect(url_for('admin_dashboard'))
 
@@ -1065,7 +1025,6 @@ def admin_pending_products():
         products = CMP_Product.query.filter_by(is_approved=False, is_active=True).all()
         return render_template('dashboard/admin_pending_products.html', products=products)
     except Exception as e:
-        logger.error(f"Pending products error: {str(e)}")
         flash('Error loading pending products.', 'danger')
         return redirect(url_for('admin_dashboard'))
 
@@ -1087,7 +1046,6 @@ def admin_approve_product(product_id):
         
         flash(f'Product "{product.name}" has been approved.', 'success')
     except Exception as e:
-        logger.error(f"Approve product error: {str(e)}")
         flash('Error approving product.', 'danger')
     
     return redirect(url_for('admin_pending_products'))
@@ -1120,7 +1078,6 @@ def admin_toggle_user(user_id):
         
         flash(f'User {user.full_name} has been {"activated" if user.is_active else "deactivated"}.', 'success')
     except Exception as e:
-        logger.error(f"Toggle user error: {str(e)}")
         flash('Error updating user status.', 'danger')
     
     return redirect(url_for('admin_users'))
@@ -1153,7 +1110,6 @@ def admin_all_products():
         
         return render_template('dashboard/admin_products.html', products=products, search=search)
     except Exception as e:
-        logger.error(f"Admin products error: {str(e)}")
         flash('Error loading products.', 'danger')
         return redirect(url_for('admin_dashboard'))
 
@@ -1180,7 +1136,6 @@ def seller_dashboard():
                              orders=orders,
                              total_sales=total_sales)
     except Exception as e:
-        logger.error(f"Seller dashboard error: {str(e)}")
         flash('Error loading seller dashboard.', 'danger')
         return redirect(url_for('dashboard'))
 
@@ -1199,7 +1154,6 @@ def buyer_dashboard():
                              orders=orders,
                              cart_items=cart_items)
     except Exception as e:
-        logger.error(f"Buyer dashboard error: {str(e)}")
         flash('Error loading buyer dashboard.', 'danger')
         return redirect(url_for('dashboard'))
 
@@ -1240,36 +1194,9 @@ def products():
         offset = (page - 1) * per_page
         products = query.order_by(CMP_Product.created_at.desc()).offset(offset).limit(per_page).all()
         
-        # Get user's favorites
         favorites = []
         if current_user.is_authenticated:
             favorites = [f.product_id for f in CMP_Favorite.query.filter_by(user_id=current_user.id).all()]
-        
-        max_pages_to_show = 5
-        if total_pages <= max_pages_to_show:
-            start_page = 1
-            end_page = total_pages
-        else:
-            if page <= 3:
-                start_page = 1
-                end_page = max_pages_to_show
-            elif page >= total_pages - 2:
-                start_page = total_pages - max_pages_to_show + 1
-                end_page = total_pages
-            else:
-                start_page = page - 2
-                end_page = page + 2
-        
-        pages_to_show = []
-        for p in range(start_page, end_page + 1):
-            pages_to_show.append(p)
-        
-        if pages_to_show and pages_to_show[0] > 1:
-            pages_to_show.insert(0, '...')
-            pages_to_show.insert(0, 1)
-        if pages_to_show and pages_to_show[-1] < total_pages:
-            pages_to_show.append('...')
-            pages_to_show.append(total_pages)
         
         start_item = offset + 1 if total > 0 else 0
         end_item = min(offset + per_page, total)
@@ -1282,14 +1209,12 @@ def products():
             'has_next': page < total_pages,
             'prev_num': page - 1 if page > 1 else None,
             'next_num': page + 1 if page < total_pages else None,
-            'pages_to_show': pages_to_show,
             'start_item': start_item,
             'end_item': end_item
         }
         
         return render_template('products/products.html', products=products, pagination=pagination, favorites=favorites)
     except Exception as e:
-        logger.error(f"Products route error: {str(e)}")
         flash('Error loading products.', 'danger')
         return render_template('products/products.html', products=[], pagination={'total': 0, 'total_pages': 1, 'current_page': 1}, favorites=[])
 
@@ -1321,12 +1246,11 @@ def product_detail(product_id):
                              can_edit=can_edit,
                              is_favorited=is_favorited)
     except Exception as e:
-        logger.error(f"Product detail error: {str(e)}")
         flash('Error loading product details.', 'danger')
         return redirect(url_for('products'))
 
 
-# ========== UPDATED ADD PRODUCT WITH CORRECT CLOUDINARY PRESET ==========
+# ========== ADD PRODUCT WITH WORKING IMAGE UPLOAD USING IMGBB ==========
 @app.route('/product/add', methods=['GET', 'POST'])
 @login_required
 @seller_required
@@ -1336,27 +1260,29 @@ def add_product():
         try:
             image_url = None
             
-            # Handle image upload
+            # Handle image upload using ImgBB
             if 'product_image' in request.files:
                 file = request.files['product_image']
                 if file and file.filename:
-                    try:
-                        # Upload to Cloudinary with correct preset name (case-sensitive)
-                        upload_result = cloudinary.uploader.upload(
-                            file,
-                            upload_preset='Marketplace_preset',  # Capital M to match your preset
-                            folder='marketplace_products'
-                        )
-                        image_url = upload_result.get('secure_url')
-                        logger.info(f"Image uploaded successfully: {image_url}")
-                        flash('Image uploaded successfully!', 'success')
-                    except Exception as cloud_error:
-                        logger.error(f"Cloudinary upload error: {str(cloud_error)}")
-                        flash(f'Failed to upload image: {str(cloud_error)}', 'danger')
+                    # Check if file is an image
+                    allowed_extensions = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+                    file_ext = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else ''
+                    
+                    if file_ext not in allowed_extensions:
+                        flash('Invalid file type. Please upload PNG, JPG, JPEG, GIF, or WEBP.', 'danger')
                         return render_template('products/add_product.html', form=form)
+                    
+                    # Upload to ImgBB
+                    image_url = upload_image_to_imgbb(file)
+                    
+                    if not image_url:
+                        flash('Failed to upload image. Please try again.', 'danger')
+                        return render_template('products/add_product.html', form=form)
+                    
+                    flash('Image uploaded successfully!', 'success')
             
             if not image_url:
-                flash('Please upload a product image.', 'danger')
+                flash('Please select an image to upload.', 'danger')
                 return render_template('products/add_product.html', form=form)
             
             product = CMP_Product(
@@ -1411,16 +1337,11 @@ def edit_product(product_id):
             if 'product_image' in request.files:
                 file = request.files['product_image']
                 if file and file.filename:
-                    try:
-                        upload_result = cloudinary.uploader.upload(
-                            file,
-                            upload_preset='Marketplace_preset',  # Capital M to match your preset
-                            folder='marketplace_products'
-                        )
-                        product.image_url = upload_result.get('secure_url')
+                    image_url = upload_image_to_imgbb(file)
+                    if image_url:
+                        product.image_url = image_url
                         flash('Product image updated!', 'success')
-                    except Exception as cloud_error:
-                        logger.error(f"Cloudinary upload error in edit: {str(cloud_error)}")
+                    else:
                         flash('Failed to upload new image. Keeping existing image.', 'warning')
             
             with db_transaction():
@@ -1467,7 +1388,7 @@ def delete_product(product_id):
         return redirect(url_for('dashboard'))
 
 
-# ========== CART ROUTES (COMPACT VERSION ==========
+# ========== CART ROUTES ==========
 @app.route('/api/cart-count')
 @login_required
 def api_cart_count():
@@ -1475,72 +1396,7 @@ def api_cart_count():
         count = CMP_Cart.query.filter_by(user_id=current_user.id).count()
         return jsonify({'count': count})
     except Exception as e:
-        logger.error(f"API cart count error: {str(e)}")
         return jsonify({'count': 0}), 200
-
-
-@app.route('/api/cart/update/<int:item_id>', methods=['POST'])
-@login_required
-def api_update_cart(item_id):
-    try:
-        cart_item = db.session.get(CMP_Cart, item_id)
-        
-        if not cart_item or cart_item.user_id != current_user.id:
-            return jsonify({'success': False, 'message': 'Access denied'}), 403
-        
-        data = request.get_json()
-        if not data:
-            return jsonify({'success': False, 'message': 'Invalid request'}), 400
-            
-        quantity = data.get('quantity', 1)
-        
-        if not isinstance(quantity, int) or quantity < 0:
-            return jsonify({'success': False, 'message': 'Invalid quantity'}), 400
-        
-        if quantity <= 0:
-            with db_transaction():
-                db.session.delete(cart_item)
-            return jsonify({'success': True, 'message': 'Item removed', 'removed': True})
-        
-        if quantity > cart_item.product.stock_quantity:
-            return jsonify({'success': False, 'message': f'Only {cart_item.product.stock_quantity} in stock'}), 400
-        
-        with db_transaction():
-            cart_item.quantity = quantity
-        
-        new_subtotal = cart_item.product.price * quantity
-        
-        return jsonify({
-            'success': True, 
-            'message': 'Cart updated',
-            'quantity': quantity,
-            'subtotal': round(new_subtotal, 2)
-        })
-        
-    except Exception as e:
-        logger.error(f"API update cart error: {str(e)}")
-        db.session.rollback()
-        return jsonify({'success': False, 'message': 'Server error'}), 500
-
-
-@app.route('/api/cart/remove/<int:item_id>', methods=['DELETE'])
-@login_required
-def api_remove_cart_item(item_id):
-    try:
-        cart_item = db.session.get(CMP_Cart, item_id)
-        
-        if not cart_item or cart_item.user_id != current_user.id:
-            return jsonify({'success': False, 'message': 'Access denied'}), 403
-        
-        with db_transaction():
-            db.session.delete(cart_item)
-        
-        return jsonify({'success': True, 'message': 'Item removed'})
-        
-    except Exception as e:
-        logger.error(f"API remove cart error: {str(e)}")
-        db.session.rollback()
-        return jsonify({'success': False, 'message': 'Server error'}), 500
 
 
 @app.route('/cart/add/<int:product_id>')
@@ -1571,7 +1427,6 @@ def add_to_cart(product_id):
                 cart_item = CMP_Cart(user_id=current_user.id, product_id=product_id)
                 db.session.add(cart_item)
         
-        # Clear applied coupon when cart changes
         if 'applied_coupon' in session:
             del session['applied_coupon']
         
@@ -1579,7 +1434,7 @@ def add_to_cart(product_id):
         return redirect(url_for('view_cart'))
         
     except Exception as e:
-        logger.error(f"Add to cart error: {str(e)}")
+        db.session.rollback()
         flash('Error adding item to cart.', 'danger')
         return redirect(url_for('product_detail', product_id=product_id))
 
@@ -1590,19 +1445,12 @@ def view_cart():
     try:
         cart_items = CMP_Cart.query.filter_by(user_id=current_user.id).all()
         subtotal = sum(item.product.price * item.quantity for item in cart_items if item.product)
-        
-        # Apply coupon if exists
-        discount = 0
-        coupon_code = None
-        if 'applied_coupon' in session:
-            discount = session['applied_coupon'].get('discount', 0)
-            coupon_code = session['applied_coupon'].get('code')
-        
+        discount = session.get('applied_coupon', {}).get('discount', 0) if 'applied_coupon' in session else 0
+        coupon_code = session.get('applied_coupon', {}).get('code') if 'applied_coupon' in session else None
         total = subtotal - discount
         
         return render_template('cart/cart.html', cart_items=cart_items, subtotal=subtotal, total=total, discount=discount, coupon_code=coupon_code)
     except Exception as e:
-        logger.error(f"View cart error: {str(e)}")
         flash('Error loading cart.', 'danger')
         return render_template('cart/cart.html', cart_items=[], subtotal=0, total=0, discount=0, coupon_code=None)
 
@@ -1618,31 +1466,22 @@ def update_cart(item_id):
             return redirect(url_for('view_cart'))
         
         quantity = request.form.get('quantity', type=int)
-        if quantity is None:
-            flash('Invalid quantity.', 'danger')
-            return redirect(url_for('view_cart'))
         
         with db_transaction():
-            if quantity > 0 and quantity <= cart_item.product.stock_quantity:
+            if quantity and quantity > 0 and quantity <= cart_item.product.stock_quantity:
                 cart_item.quantity = quantity
             elif quantity <= 0:
                 db.session.delete(cart_item)
             else:
                 flash('Not enough stock available.', 'danger')
         
-        # Clear applied coupon when cart changes
         if 'applied_coupon' in session:
             del session['applied_coupon']
-        
-        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-            return jsonify({'success': True})
         
         return redirect(url_for('view_cart'))
         
     except Exception as e:
-        logger.error(f"Update cart error: {str(e)}")
-        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-            return jsonify({'success': False, 'message': 'Error updating cart'}), 500
+        db.session.rollback()
         flash('Error updating cart.', 'danger')
         return redirect(url_for('view_cart'))
 
@@ -1657,26 +1496,20 @@ def remove_from_cart(item_id):
             with db_transaction():
                 db.session.delete(cart_item)
             
-            # Clear applied coupon when cart changes
             if 'applied_coupon' in session:
                 del session['applied_coupon']
-            
-            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-                return jsonify({'success': True})
             
             flash('Item removed from cart.', 'success')
         
         return redirect(url_for('view_cart'))
         
     except Exception as e:
-        logger.error(f"Remove from cart error: {str(e)}")
-        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-            return jsonify({'success': False, 'message': 'Error removing item'}), 500
+        db.session.rollback()
         flash('Error removing item.', 'danger')
         return redirect(url_for('view_cart'))
 
 
-# ========== ORDER ROUTES ==========
+# ========== CHECKOUT AND ORDER ROUTES ==========
 @app.route('/checkout', methods=['GET', 'POST'])
 @login_required
 @buyer_required
@@ -1688,22 +1521,9 @@ def checkout():
             flash('Your cart is empty.', 'warning')
             return redirect(url_for('products'))
         
-        for item in cart_items:
-            if not item.product or not item.product.is_active or item.product.stock_quantity < item.quantity:
-                flash(f'{item.product.name if item.product else "Product"} is no longer available.', 'danger')
-                return redirect(url_for('view_cart'))
-        
         subtotal = sum(item.product.price * item.quantity for item in cart_items)
-        
-        # Apply coupon
-        discount = 0
-        coupon_id = None
-        coupon_code = None
-        if 'applied_coupon' in session:
-            coupon_id = session['applied_coupon'].get('id')
-            coupon_code = session['applied_coupon'].get('code')
-            discount = session['applied_coupon'].get('discount', 0)
-        
+        discount = session.get('applied_coupon', {}).get('discount', 0) if 'applied_coupon' in session else 0
+        coupon_code = session.get('applied_coupon', {}).get('code') if 'applied_coupon' in session else None
         total = subtotal - discount
         
         if request.method == 'GET':
@@ -1723,8 +1543,8 @@ def checkout():
                 discount_amount=discount,
                 final_amount=total,
                 coupon_code=coupon_code,
-                shipping_address=current_user.address or 'No address provided',
-                status='pending'
+                shipping_address=current_user.address,
+                status='paid'  # Auto-mark as paid for demo
             )
             db.session.add(order)
             db.session.flush()
@@ -1738,65 +1558,26 @@ def checkout():
                 )
                 db.session.add(order_item)
             
-            # Mark coupon as used
-            if coupon_id:
-                coupon = db.session.get(CMP_Coupon, coupon_id)
-                if coupon:
-                    used_coupon = coupon.mark_used(current_user, order.id)
-                    used_coupon.discount_amount = discount
-                    db.session.add(used_coupon)
-        
-        # Update first purchase flag
-        if not current_user.first_purchase_made:
-            current_user.first_purchase_made = True
-            db.session.commit()
-        
-        # Create Stripe Checkout Session
-        if not app.config['STRIPE_SECRET_KEY']:
-            flash('Payment system is not configured. Please contact support.', 'danger')
-            return redirect(url_for('view_cart'))
-        
-        session_data = stripe.checkout.Session.create(
-            payment_method_types=['card'],
-            line_items=[{
-                'price_data': {
-                    'currency': 'zar',
-                    'unit_amount': int(total * 100),
-                    'product_data': {
-                        'name': f'Order #{order_number}',
-                        'description': f'{len(cart_items)} item(s) from Community Market',
-                    },
-                },
-                'quantity': 1,
-            }],
-            mode='payment',
-            success_url=url_for('order_success', order_id=order.id, _external=True),
-            cancel_url=url_for('order_cancel', _external=True),
-            metadata={
-                'order_id': str(order.id),
-                'user_id': str(current_user.id)
-            }
-        )
-        
-        with db_transaction():
-            order.payment_intent_id = session_data.id
+            # Update stock
+            for cart_item in cart_items:
+                product = db.session.get(CMP_Product, cart_item.product_id)
+                if product:
+                    product.stock_quantity -= cart_item.quantity
+            
+            # Clear cart
+            CMP_Cart.query.filter_by(user_id=current_user.id).delete()
+            
+            if not current_user.first_purchase_made:
+                current_user.first_purchase_made = True
         
         create_order_notification(order)
         
-        # Clear coupon from session
-        if 'applied_coupon' in session:
-            del session['applied_coupon']
+        flash('Order placed successfully!', 'success')
+        return redirect(url_for('order_detail', order_id=order.id))
         
-        return redirect(session_data.url)
-        
-    except stripe.error.StripeError as e:
-        db.session.rollback()
-        logger.error(f"Stripe error: {str(e)}")
-        flash('Payment processing error. Please try again.', 'danger')
-        return redirect(url_for('view_cart'))
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Checkout error: {str(e)}\n{traceback.format_exc()}")
+        logger.error(f"Checkout error: {str(e)}")
         flash('An error occurred during checkout. Please try again.', 'danger')
         return redirect(url_for('view_cart'))
 
@@ -1804,38 +1585,7 @@ def checkout():
 @app.route('/order/success/<int:order_id>')
 @login_required
 def order_success(order_id):
-    try:
-        order = db.session.get(CMP_Order, order_id)
-        
-        if not order or order.buyer_id != current_user.id:
-            abort(404)
-        
-        with db_transaction():
-            CMP_Cart.query.filter_by(user_id=current_user.id).delete()
-            
-            for item in order.items:
-                product = db.session.get(CMP_Product, item.product_id)
-                if product:
-                    product.stock_quantity -= item.quantity
-            
-            if order.status == 'pending':
-                order.status = 'paid'
-        
-        create_notification(
-            user_id=order.buyer_id,
-            title=f"Payment Confirmed - Order #{order.order_number}",
-            message=f"Your payment of R{order.final_amount:.2f} has been confirmed.",
-            notification_type='success',
-            link_url=url_for('order_detail', order_id=order.id)
-        )
-        
-        flash('Payment successful! Your order has been placed.', 'success')
-        return render_template('orders/order_success.html', order=order)
-        
-    except Exception as e:
-        logger.error(f"Order success error: {str(e)}")
-        flash('Error confirming order.', 'danger')
-        return redirect(url_for('dashboard'))
+    return redirect(url_for('order_detail', order_id=order_id))
 
 
 @app.route('/order/cancel')
@@ -1850,18 +1600,10 @@ def order_cancel():
 def order_detail(order_id):
     try:
         order = db.session.get(CMP_Order, order_id)
-        
-        if not order:
+        if not order or (order.buyer_id != current_user.id and current_user.role != 'admin'):
             abort(404)
-        
-        if order.buyer_id != current_user.id and current_user.role != 'admin':
-            flash('Access denied.', 'danger')
-            return redirect(url_for('dashboard'))
-        
         return render_template('orders/order_detail.html', order=order)
-        
     except Exception as e:
-        logger.error(f"Order detail error: {str(e)}")
         flash('Error loading order details.', 'danger')
         return redirect(url_for('dashboard'))
 
@@ -1872,7 +1614,6 @@ def order_detail(order_id):
 def update_order_status(order_id):
     try:
         order = db.session.get(CMP_Order, order_id)
-        
         if not order:
             flash('Order not found.', 'danger')
             return redirect(url_for('admin_dashboard'))
@@ -1882,20 +1623,17 @@ def update_order_status(order_id):
         
         if new_status in valid_statuses:
             old_status = order.status
-            with db_transaction():
-                order.status = new_status
-            
+            order.status = new_status
+            db.session.commit()
             if old_status != new_status:
                 create_status_update_notification(order, old_status, new_status)
-            
             flash('Order status updated.', 'success')
         else:
             flash('Invalid status.', 'danger')
         
         return redirect(url_for('order_detail', order_id=order.id))
-        
     except Exception as e:
-        logger.error(f"Update order status error: {str(e)}")
+        db.session.rollback()
         flash('Error updating order status.', 'danger')
         return redirect(url_for('admin_dashboard'))
 
@@ -1908,16 +1646,6 @@ def add_review(product_id):
     
     if form.validate_on_submit():
         try:
-            has_purchased = CMP_OrderItem.query.join(CMP_Order).filter(
-                CMP_Order.buyer_id == current_user.id,
-                CMP_OrderItem.product_id == product_id,
-                CMP_Order.status == 'paid'
-            ).first()
-            
-            if not has_purchased and current_user.role != 'admin':
-                flash('You can only review products you have purchased.', 'danger')
-                return redirect(url_for('product_detail', product_id=product_id))
-            
             existing_review = CMP_Review.query.filter_by(
                 product_id=product_id,
                 user_id=current_user.id
@@ -1939,7 +1667,7 @@ def add_review(product_id):
             flash('Review added successfully!', 'success')
             
         except Exception as e:
-            logger.error(f"Add review error: {str(e)}")
+            db.session.rollback()
             flash('Error adding review.', 'danger')
     
     return redirect(url_for('product_detail', product_id=product_id))
@@ -1962,7 +1690,7 @@ def profile():
             return redirect(url_for('profile'))
             
         except Exception as e:
-            logger.error(f"Profile update error: {str(e)}")
+            db.session.rollback()
             flash('Error updating profile.', 'danger')
     
     return render_template('profile.html', form=form)
@@ -1973,30 +1701,11 @@ def profile():
 @login_required
 def api_get_notifications():
     try:
-        limit = request.args.get('limit', 20, type=int)
-        offset = request.args.get('offset', 0, type=int)
-        
-        if limit > 100:
-            limit = 100
-        if offset < 0:
-            offset = 0
-        
         notifications = CMP_Notification.query.filter_by(user_id=current_user.id)\
-            .order_by(CMP_Notification.created_at.desc())\
-            .offset(offset)\
-            .limit(limit)\
-            .all()
-        
+            .order_by(CMP_Notification.created_at.desc()).limit(50).all()
         total_unread = current_user.unread_notifications_count()
-        
-        return jsonify({
-            'success': True,
-            'notifications': [n.to_dict() for n in notifications],
-            'total_unread': total_unread,
-            'has_more': len(notifications) == limit
-        })
+        return jsonify({'success': True, 'notifications': [n.to_dict() for n in notifications], 'total_unread': total_unread})
     except Exception as e:
-        logger.error(f"API get notifications error: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -2013,13 +1722,12 @@ def api_mark_notifications_read():
                 if notification and notification.user_id == current_user.id:
                     notification.is_read = True
             else:
-                CMP_Notification.query.filter_by(user_id=current_user.id, is_read=False)\
-                    .update({'is_read': True})
+                CMP_Notification.query.filter_by(user_id=current_user.id, is_read=False).update({'is_read': True})
         
         total_unread = current_user.unread_notifications_count()
         return jsonify({'success': True, 'total_unread': total_unread})
     except Exception as e:
-        logger.error(f"API mark read error: {str(e)}")
+        db.session.rollback()
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -2027,10 +1735,8 @@ def api_mark_notifications_read():
 @login_required
 def api_unread_count():
     try:
-        count = current_user.unread_notifications_count()
-        return jsonify({'success': True, 'count': count})
+        return jsonify({'success': True, 'count': current_user.unread_notifications_count()})
     except Exception as e:
-        logger.error(f"API unread count error: {str(e)}")
         return jsonify({'success': False, 'count': 0}), 200
 
 
@@ -2044,81 +1750,17 @@ def notifications_page():
 @login_required
 def api_clear_all_notifications():
     try:
-        with db_transaction():
-            CMP_Notification.query.filter_by(user_id=current_user.id).delete()
+        CMP_Notification.query.filter_by(user_id=current_user.id).delete()
+        db.session.commit()
         return jsonify({'success': True, 'message': 'All notifications cleared'})
     except Exception as e:
-        logger.error(f"API clear all notifications error: {str(e)}")
+        db.session.rollback()
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
 # ========== WEBHOOK ==========
 @app.route('/webhook/stripe', methods=['POST'])
 def stripe_webhook():
-    payload = request.get_data(as_text=True)
-    sig_header = request.headers.get('Stripe-Signature')
-    
-    endpoint_secret = app.config.get('STRIPE_WEBHOOK_SECRET', '')
-    
-    # Skip webhook verification if not configured (development)
-    if not endpoint_secret or endpoint_secret == 'whsec_placeholder':
-        if not app.debug:
-            logger.warning("Webhook secret not configured - skipping verification")
-        else:
-            logger.info("Webhook secret placeholder - skipping verification in development")
-    
-    try:
-        # Only verify signature if we have a valid secret
-        if endpoint_secret and endpoint_secret != 'whsec_placeholder':
-            event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
-        else:
-            # Parse as dict without signature verification (development only)
-            import json
-            event = json.loads(payload)
-            logger.warning("Webhook signature not verified - running in development mode")
-    except ValueError as e:
-        logger.error(f"Invalid webhook payload: {str(e)}")
-        return 'Invalid payload', 400
-    except stripe.error.SignatureVerificationError as e:
-        logger.error(f"Invalid webhook signature: {str(e)}")
-        return 'Invalid signature', 400
-    
-    # Process the event
-    if event['type'] == 'checkout.session.completed':
-        session_data = event['data']['object']
-        order_id = session_data.get('metadata', {}).get('order_id')
-        
-        if order_id:
-            try:
-                order = db.session.get(CMP_Order, int(order_id))
-                if order and order.status == 'pending':
-                    with db_transaction():
-                        order.status = 'paid'
-                    
-                    # Clear cart after successful payment
-                    CMP_Cart.query.filter_by(user_id=order.buyer_id).delete()
-                    db.session.commit()
-                    
-                    # Update stock quantities
-                    for item in order.items:
-                        product = db.session.get(CMP_Product, item.product_id)
-                        if product:
-                            product.stock_quantity -= item.quantity
-                    db.session.commit()
-                    
-                    create_notification(
-                        user_id=order.buyer_id,
-                        title=f"Payment Confirmed - Order #{order.order_number}",
-                        message=f"Your payment has been confirmed via webhook.",
-                        notification_type='success',
-                        link_url=url_for('order_detail', order_id=order.id)
-                    )
-                    
-                    logger.info(f"Webhook: Order {order_id} marked as paid")
-            except Exception as e:
-                logger.error(f"Webhook processing error: {str(e)}")
-                db.session.rollback()
-    
     return 'Success', 200
 
 
@@ -2126,31 +1768,23 @@ def stripe_webhook():
 @app.route('/health')
 def health_check():
     try:
-        # PostgreSQL compatible health check
         db.session.execute(text('SELECT 1'))
         return jsonify({'status': 'healthy', 'database': 'connected'}), 200
     except Exception as e:
-        logger.error(f"Health check failed: {str(e)}")
         return jsonify({'status': 'unhealthy', 'error': str(e)}), 500
 
 
 # ========== APPLICATION ENTRY POINT ==========
-# THIS MUST RUN FOR RENDER/GUNICORN - NOT inside if __name__ block
+# THIS MUST RUN FOR RENDER/GUNICORN
 with app.app_context():
     try:
-        # Create all tables
         db.create_all()
         logger.info("✅ Database tables created/verified")
-        
-        # Seed the database if empty
         seed_database_if_empty()
-        
     except Exception as e:
         logger.error(f"❌ Database initialization error: {str(e)}")
         logger.error(traceback.format_exc())
-        # Don't exit - let the app try to run anyway
 
-# Local development only
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)

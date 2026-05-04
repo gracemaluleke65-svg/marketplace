@@ -53,8 +53,8 @@
                             </div>
                         </div>
                         
-                        <div class="row">
-                            <div class="col-md-6 mb-3">
+                        <div class="row mb-3">
+                            <div class="col-md-6">
                                 {{ form.category.label(class="form-label fw-semibold") }}
                                 {{ form.category(class="form-select form-select-lg") }}
                                 {% for error in form.category.errors %}
@@ -62,26 +62,38 @@
                                 {% endfor %}
                             </div>
                             
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label fw-semibold">Update Image</label>
-                                <input type="file" name="product_image" class="form-control form-control-lg" accept="image/*" id="productImage">
-                                <small class="text-muted">
-                                    {% if product.image_url %}
-                                        Current image uploaded. Upload new to replace.
-                                    {% else %}
-                                        No image uploaded. Upload one now!
-                                    {% endif %}
-                                </small>
-                                {% if product.image_url %}
-                                    <img id="imagePreview" src="{{ product.image_url }}" class="img-fluid mt-2 rounded" style="max-height: 150px;">
-                                {% else %}
-                                    <img id="imagePreview" class="img-fluid mt-2 rounded" style="display: none; max-height: 150px;">
-                                {% endif %}
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold">Product Image</label>
+                                <input type="file" name="product_image" class="form-control form-control-lg" accept="image/jpeg,image/png,image/jpg,image/gif,image/webp" id="productImage">
+                                <small class="text-muted">Upload a new image to replace the current one (leave empty to keep current image)</small>
+                                
+                                <div id="currentImageContainer" class="mt-2">
+                                    <strong>Current Image:</strong>
+                                    <div class="mt-1">
+                                        <img id="currentImage" src="{{ product.image_url }}" class="img-fluid rounded" style="max-height: 150px;">
+                                        <button type="button" class="btn btn-sm btn-danger mt-1" onclick="removeCurrentImage()">Remove Current Image</button>
+                                        <input type="hidden" name="remove_image" id="removeImage" value="false">
+                                    </div>
+                                </div>
+                                
+                                <div id="newImagePreviewContainer" style="display: none;">
+                                    <strong class="mt-2 d-block">New Image Preview:</strong>
+                                    <img id="newImagePreview" class="img-fluid rounded mt-1" style="max-height: 150px;">
+                                    <button type="button" class="btn btn-sm btn-warning mt-1" onclick="cancelNewImage()">Cancel New Image</button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="alert alert-info d-flex align-items-center gap-3 mt-3">
+                            <i class="fa fa-info-circle fa-2x text-primary"></i>
+                            <div>
+                                <strong class="d-block">Admin Approval May Be Required</strong>
+                                <small>If you change product details, it may need to be re-approved by admin.</small>
                             </div>
                         </div>
                         
                         <div class="d-grid gap-3 mt-4">
-                            {{ form.submit(class="btn btn-primary btn-lg py-3", value="Update Product") }}
+                            <button type="submit" class="btn btn-primary btn-lg py-3">Update Product</button>
                             <a href="{{ url_for('product_detail', product_id=product.id) }}" class="btn btn-outline-secondary btn-lg py-3">Cancel</a>
                         </div>
                     </form>
@@ -92,22 +104,52 @@
 </div>
 
 <script>
+    let newFileSelected = false;
+    
     document.getElementById('productImage')?.addEventListener('change', function(e) {
         const file = e.target.files[0];
         if (file) {
+            // Check file size (32MB max for ImgBB)
+            if (file.size > 32 * 1024 * 1024) {
+                alert('Image too large. Maximum 32MB.');
+                this.value = '';
+                return;
+            }
+            
+            // Check file type
+            const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+            if (!allowedTypes.includes(file.type)) {
+                alert('Invalid file type. Please upload JPG, PNG, GIF, or WEBP images only.');
+                this.value = '';
+                return;
+            }
+            
             const reader = new FileReader();
             reader.onload = function(e) {
-                const preview = document.getElementById('imagePreview');
-                preview.src = e.target.result;
-                preview.style.display = 'block';
+                document.getElementById('newImagePreview').src = e.target.result;
+                document.getElementById('newImagePreviewContainer').style.display = 'block';
+                document.getElementById('currentImageContainer').style.opacity = '0.5';
+                newFileSelected = true;
             };
             reader.readAsDataURL(file);
-            
-            if (file.size > 5 * 1024 * 1024) {
-                alert('Image too large. Maximum 5MB.');
-                this.value = '';
-            }
+        } else {
+            cancelNewImage();
         }
     });
+    
+    function removeCurrentImage() {
+        if (confirm('Are you sure you want to remove the current image? The product will have no image.')) {
+            document.getElementById('currentImageContainer').style.display = 'none';
+            document.getElementById('removeImage').value = 'true';
+            document.getElementById('productImage').required = false;
+        }
+    }
+    
+    function cancelNewImage() {
+        document.getElementById('productImage').value = '';
+        document.getElementById('newImagePreviewContainer').style.display = 'none';
+        document.getElementById('currentImageContainer').style.opacity = '1';
+        newFileSelected = false;
+    }
 </script>
 {% endblock %}
