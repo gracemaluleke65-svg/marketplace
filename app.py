@@ -161,10 +161,6 @@ def db_transaction():
         raise
 
 
-
-
-
-
 # ========== DATABASE SEEDING FUNCTION (RUNS ONLY ONCE FOR CMP TABLES) ==========
 def seed_database_if_empty():
     """Seed the database with initial data only if CMP_users table is empty"""
@@ -405,10 +401,6 @@ def seed_database_if_empty():
             logger.error(f"Seeding error: {str(e)}")
             db.session.rollback()
             raise
-
-
-
-
 
 
 # ========== NOTIFICATION HELPER FUNCTIONS ==========
@@ -1335,6 +1327,7 @@ def product_detail(product_id):
         return redirect(url_for('products'))
 
 
+# ========== UPDATED ADD PRODUCT WITH CLOUDINARY ERROR HANDLING ==========
 @app.route('/product/add', methods=['GET', 'POST'])
 @login_required
 @seller_required
@@ -1346,8 +1339,20 @@ def add_product():
             if 'product_image' in request.files:
                 file = request.files['product_image']
                 if file and file.filename:
-                    upload_result = cloudinary.uploader.upload(file)
-                    image_url = upload_result.get('secure_url')
+                    try:
+                        # Try to upload to Cloudinary
+                        upload_result = cloudinary.uploader.upload(file)
+                        image_url = upload_result.get('secure_url')
+                        logger.info(f"Image uploaded successfully: {image_url}")
+                    except Exception as cloud_error:
+                        # If Cloudinary fails, use a placeholder and log the error
+                        logger.error(f"Cloudinary upload error: {str(cloud_error)}")
+                        image_url = 'https://via.placeholder.com/400x300?text=Product+Image'
+                        flash('Image upload failed, using placeholder image.', 'warning')
+            
+            # If no image was uploaded or Cloudinary failed, use placeholder
+            if not image_url:
+                image_url = 'https://via.placeholder.com/400x300?text=Product+Image'
             
             product = CMP_Product(
                 name=form.name.data.strip(),
@@ -1400,8 +1405,12 @@ def edit_product(product_id):
             if 'product_image' in request.files:
                 file = request.files['product_image']
                 if file and file.filename:
-                    upload_result = cloudinary.uploader.upload(file)
-                    product.image_url = upload_result.get('secure_url')
+                    try:
+                        upload_result = cloudinary.uploader.upload(file)
+                        product.image_url = upload_result.get('secure_url')
+                    except Exception as cloud_error:
+                        logger.error(f"Cloudinary upload error in edit: {str(cloud_error)}")
+                        flash('Image upload failed, keeping existing image.', 'warning')
             
             with db_transaction():
                 pass
