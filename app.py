@@ -79,8 +79,7 @@ login_manager.login_message = 'Please log in to access this page.'
 login_manager.login_message_category = 'warning'
 login_manager.session_protection = 'strong'
 
-# Initialize Cloudinary with upload preset
-CLOUDINARY_UPLOAD_PRESET = 'marketplace_preset'  # Create this in Cloudinary settings
+# Initialize Cloudinary
 try:
     if app.config['CLOUDINARY_CLOUD_NAME']:
         cloudinary.config(
@@ -1327,7 +1326,7 @@ def product_detail(product_id):
         return redirect(url_for('products'))
 
 
-# ========== UPDATED ADD PRODUCT WITH WORKING CLOUDINARY ==========
+# ========== UPDATED ADD PRODUCT WITH CORRECT CLOUDINARY PRESET ==========
 @app.route('/product/add', methods=['GET', 'POST'])
 @login_required
 @seller_required
@@ -1342,10 +1341,10 @@ def add_product():
                 file = request.files['product_image']
                 if file and file.filename:
                     try:
-                        # Upload to Cloudinary with preset
+                        # Upload to Cloudinary with correct preset name (case-sensitive)
                         upload_result = cloudinary.uploader.upload(
                             file,
-                            upload_preset='marketplace_preset',  # You must create this preset in Cloudinary
+                            upload_preset='Marketplace_preset',  # Capital M to match your preset
                             folder='marketplace_products'
                         )
                         image_url = upload_result.get('secure_url')
@@ -1353,10 +1352,9 @@ def add_product():
                         flash('Image uploaded successfully!', 'success')
                     except Exception as cloud_error:
                         logger.error(f"Cloudinary upload error: {str(cloud_error)}")
-                        flash('Failed to upload image. Please try again or use a different image.', 'danger')
+                        flash(f'Failed to upload image: {str(cloud_error)}', 'danger')
                         return render_template('products/add_product.html', form=form)
             
-            # If no image was uploaded, show error
             if not image_url:
                 flash('Please upload a product image.', 'danger')
                 return render_template('products/add_product.html', form=form)
@@ -1416,7 +1414,7 @@ def edit_product(product_id):
                     try:
                         upload_result = cloudinary.uploader.upload(
                             file,
-                            upload_preset='marketplace_preset',
+                            upload_preset='Marketplace_preset',  # Capital M to match your preset
                             folder='marketplace_products'
                         )
                         product.image_url = upload_result.get('secure_url')
@@ -1469,7 +1467,7 @@ def delete_product(product_id):
         return redirect(url_for('dashboard'))
 
 
-# ========== CART ROUTES ==========
+# ========== CART ROUTES (COMPACT VERSION ==========
 @app.route('/api/cart-count')
 @login_required
 def api_cart_count():
