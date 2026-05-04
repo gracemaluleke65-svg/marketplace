@@ -161,6 +161,10 @@ def db_transaction():
         raise
 
 
+
+
+
+
 # ========== DATABASE SEEDING FUNCTION (RUNS ONLY ONCE FOR CMP TABLES) ==========
 def seed_database_if_empty():
     """Seed the database with initial data only if CMP_users table is empty"""
@@ -232,14 +236,16 @@ def seed_database_if_empty():
             db.session.add(buyer)
             logger.info("✓ Sample buyer created!")
             
-            # Create additional buyers for reviews
+            # Create additional buyers for reviews - FIXED: 10 digit phone numbers
             buyer_names = ['Sarah Johnson', 'Michael Brown', 'Lisa Anderson', 'David Wilson', 'Emma Thompson']
             buyers = []
+            # Phone numbers: 0810014567, 0810024567, 0810034567, 0810044567, 0810054567 (10 digits each)
+            phone_numbers = ['0810014567', '0810024567', '0810034567', '0810044567', '0810054567']
             for i, name in enumerate(buyer_names):
                 new_buyer = CMP_User(
                     full_name=name,
                     email=f'reviewer{i+1}@example.com',
-                    phone_number=f'081{i+1:03d}45678',
+                    phone_number=phone_numbers[i],
                     address=f'{i+1} Review St, Cape Town, 8001',
                     role='buyer',
                     is_active=True
@@ -399,6 +405,10 @@ def seed_database_if_empty():
             logger.error(f"Seeding error: {str(e)}")
             db.session.rollback()
             raise
+
+
+
+
 
 
 # ========== NOTIFICATION HELPER FUNCTIONS ==========
