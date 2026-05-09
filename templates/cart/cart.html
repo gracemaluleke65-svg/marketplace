@@ -21,7 +21,7 @@
                                     <th>Quantity</th>
                                     <th>Subtotal</th>
                                     <th></th>
-                                </tr>
+                                 </tr>
                             </thead>
                             <tbody>
                                 {% for item in cart_items %}
@@ -55,7 +55,7 @@
                                             <i class="fas fa-trash"></i>
                                         </button>
                                     </td>
-                                </tr>
+                                 </tr>
                                 {% endfor %}
                             </tbody>
                         </table>
@@ -105,7 +105,7 @@
                             <i class="fas fa-credit-card me-2"></i> Proceed to Checkout
                         </a>
                         <a href="{{ url_for('products') }}" class="btn btn-outline-secondary">
-                            <i class="fas fa-continue-shopping me-2"></i> Continue Shopping
+                            <i class="fas fa-shopping-cart me-2"></i> Continue Shopping
                         </a>
                     </div>
                 </div>
@@ -245,15 +245,19 @@ document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('.remove-item').forEach(btn => {
         btn.addEventListener('click', function() {
             const itemId = this.getAttribute('data-id');
-            fetch(`/api/cart/remove/${itemId}`, {
-                method: 'DELETE',
+            // FIXED: Removed '/api' prefix
+            fetch(`/cart/remove/${itemId}`, {
+                method: 'GET',
                 headers: { 'X-Requested-With': 'XMLHttpRequest' }
             })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
+            .then(response => {
+                if (response.redirected || response.ok) {
                     location.reload();
                 }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                location.reload();
             });
         });
     });
@@ -262,26 +266,42 @@ document.addEventListener('DOMContentLoaded', function() {
         const itemId = row.getAttribute('data-id');
         const quantity = row.querySelector('.quantity-input').value;
         
-        fetch(`/api/cart/update/${itemId}`, {
+        // Create form data for traditional POST request
+        const formData = new FormData();
+        formData.append('quantity', parseInt(quantity));
+        
+        // FIXED: Removed '/api' prefix and use traditional form POST
+        fetch(`/cart/update/${itemId}`, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
                 'X-Requested-With': 'XMLHttpRequest'
             },
-            body: JSON.stringify({ quantity: parseInt(quantity) })
+            body: formData
         })
-        .then(response => response.json())
+        .then(response => {
+            if (response.redirected) {
+                location.reload();
+                return;
+            }
+            return response.json().catch(() => ({ success: true }));
+        })
         .then(data => {
-            if (data.success) {
+            if (data && data.success !== false) {
                 const price = parseFloat(row.getAttribute('data-price'));
                 const subtotal = price * parseInt(quantity);
                 row.querySelector('.subtotal').textContent = `R${subtotal.toFixed(2)}`;
                 updateOrderSummary();
                 updateCartCount();
-                if (data.removed) {
+                if (data && data.removed) {
                     location.reload();
                 }
+            } else {
+                location.reload();
             }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            location.reload();
         });
     }
     
@@ -295,7 +315,7 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // Re-apply coupon if exists
         const couponCode = document.getElementById('couponCode');
-        if (couponCode.value && document.getElementById('applyCouponBtn').disabled) {
+        if (couponCode && couponCode.value && document.getElementById('applyCouponBtn').disabled) {
             applyCoupon(couponCode.value, subtotal);
         } else {
             document.getElementById('total').textContent = `R${subtotal.toFixed(2)}`;
@@ -308,7 +328,8 @@ document.addEventListener('DOMContentLoaded', function() {
             .then(data => {
                 const badge = document.getElementById('cartCount');
                 if (badge) badge.textContent = data.count || 0;
-            });
+            })
+            .catch(error => console.error('Error updating cart count:', error));
     }
     
     // Coupon functionality
@@ -338,9 +359,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.getElementById('applyCouponBtn').disabled = true;
                 document.getElementById('couponCode').disabled = true;
                 
-                // Add remove button
+                // Add remove button if not exists
                 const discountRow = document.getElementById('discountRow');
-                if (!document.getElementById('removeCouponBtn')) {
+                if (discountRow && !document.getElementById('removeCouponBtn')) {
                     const removeBtn = document.createElement('button');
                     removeBtn.id = 'removeCouponBtn';
                     removeBtn.className = 'btn btn-sm btn-link p-0 ms-2';
@@ -349,12 +370,18 @@ document.addEventListener('DOMContentLoaded', function() {
                     removeBtn.onclick = removeCoupon;
                     discountRow.appendChild(removeBtn);
                 }
+                
+                setTimeout(() => { messageEl.innerHTML = ''; }, 3000);
             } else {
                 messageEl.innerHTML = `<span class="text-danger"><i class="fas fa-exclamation-circle"></i> ${data.message}</span>`;
-            }
-            setTimeout(() => {
                 setTimeout(() => { messageEl.innerHTML = ''; }, 3000);
-            }, 3000);
+            }
+        })
+        .catch(error => {
+            console.error('Error applying coupon:', error);
+            const messageEl = document.getElementById('couponMessage');
+            messageEl.innerHTML = `<span class="text-danger"><i class="fas fa-exclamation-circle"></i> Error applying coupon</span>`;
+            setTimeout(() => { messageEl.innerHTML = ''; }, 3000);
         });
     }
     
@@ -368,10 +395,23 @@ document.addEventListener('DOMContentLoaded', function() {
             if (data.success) {
                 location.reload();
             }
+        })
+        .catch(error => {
+            console.error('Error removing coupon:', error);
+            location.reload();
         });
     }
     
     document.getElementById('removeCouponBtn')?.addEventListener('click', removeCoupon);
+    
+    // Helper function for toast notifications
+    window.showToast = function(message, type = 'info') {
+        // You can implement a proper toast notification system here
+        // For now, we'll use alert
+        if (type === 'warning') {
+            alert(message);
+        }
+    };
 });
 </script>
 {% endblock %}
